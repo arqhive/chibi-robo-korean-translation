@@ -1,9 +1,10 @@
 """Build the GameCube file-unit patcher zip (patcher/ + data/ + bin/).
 
-The Korean build overwrites five places of the original image (see
-build_integrated_test.write_iso): header 0x420, the qp.bin FST entry, the
-moved DOL, the moved qp.bin and opening.bnr in place.  So the patcher copies
-the original image and writes xdelta-patched DOL, qp.bin, opening.bnr and FST.
+The Korean build (build_v06.write_iso_boot_order) overwrites five places of
+the original image: header 0x420, the grown DOL at the original DOL offset,
+the FST right after it, qp.bin moved into the gap and opening.bnr in place.
+So the patcher copies the original image and writes xdelta-patched DOL,
+FST, qp.bin and opening.bnr at the build's offsets.
 
 Usage: python -X utf8 tools/make_patcher.py BUILD.iso VERSION
 """
@@ -53,7 +54,8 @@ def main():
     build, version = Path(sys.argv[1]), sys.argv[2]
     oh, ofo, ofst, ofiles, odoff, odol, oblobs = image(ORIG)
     nh, nfo, nfst, nfiles, ndoff, ndol, nblobs = image(build)
-    assert oh[:0x420] == nh[:0x420] and ofo == nfo and len(ofst) == len(nfst)
+    assert oh[:0x420] == nh[:0x420] and len(ofst) == len(nfst)
+    assert ndoff + len(ndol) <= nfo, 'DOL must stay before the FST (UWUVCI black screen otherwise)'
     assert set(ofiles) == set(nfiles)
     # only qp.bin moved; every other file keeps its place
     assert all(ofiles[k] == nfiles[k] for k in ofiles if k != 'qp.bin')

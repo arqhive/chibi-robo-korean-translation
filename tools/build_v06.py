@@ -302,6 +302,71 @@ def copy_verified(src, dst, expected):
     tmp.rename(dst); return {'path': str(dst), 'sha256': expected}
 
 
+def write_iso_boot_order(inv, dol, qp, banner):
+    """v28+: keep the original boot order header -> apploader -> DOL -> FST (UWUVCI showed a black
+    screen when the DOL sat after the FST). The grown DOL starts at the original DOL offset, the
+    FST follows it, qp.bin moves into the gap before the first file and opening.bnr stays in place."""
+    import hashlib
+    from verify_integrated_layout import validate_ranges
+    from verify_roundtrip import encode_table
+    origin = next(x for x in read('metadata/originals.json')['files'] if x['edition'] == 'jp')
+    source = ROOT / origin['path']; size = origin['size_bytes']
+    qentry = next(x for x in inv['files'] if x['path'] == 'qp.bin')
+    bentry = next(x for x in inv['files'] if x['path'] == 'opening.bnr')
+    first_file = min(x['offset'] for x in inv['files'] if x['path'] != 'qp.bin')
+    dol_offset = inv['dol']['offset']
+    fst_offset = (dol_offset + len(dol) + 0x1f) & ~0x1f
+    qp_offset = (fst_offset + inv['fst_size'] + 0x7fff) & ~0x7fff
+    assert qp_offset + len(qp) <= first_file and len(banner) == bentry['size']
+    with source.open('rb') as src:
+        src.seek(0x420); header = bytearray(src.read(16))
+        assert struct.unpack('>3I', header[:12]) == (dol_offset, inv['fst_offset'], inv['fst_size'])
+        src.seek(inv['fst_offset']); old_fst = src.read(inv['fst_size'])
+    table = model_table(old_fst); node = table['entries'][qentry['index']]
+    assert (node['a'], node['b']) == (qentry['offset'], qentry['size'])
+    node['a'], node['b'] = qp_offset, len(qp)
+    fst = encode_table(table); assert len(fst) == len(old_fst)
+    at = qentry['index'] * 12 + 4; restored = bytearray(fst); restored[at:at + 8] = old_fst[at:at + 8]
+    assert restored == old_fst
+    struct.pack_into('>2I', header, 0, dol_offset, fst_offset)
+    changes = [(0x420, bytes(header)), (dol_offset, dol), (fst_offset, fst), (qp_offset, qp), (bentry['offset'], banner)]
+    validate_ranges(changes, size)
+    for offset, raw in changes[1:4]:   # only boot data and the free gap before the first file
+        assert offset + len(raw) <= first_file
+    manifest = []
+    with source.open('rb') as src:
+        for offset, data in changes:
+            src.seek(offset); before = src.read(len(data))
+            manifest.append({'offset': offset, 'bytes': len(data), 'before_sha256': p.sha(before), 'after_sha256': p.sha(data)})
+    partial = OUTPUT.with_suffix('.iso.partial')
+    assert not OUTPUT.exists() and not partial.exists(), 'Refuse to overwrite existing build or partial'
+    out_hash = hashlib.sha256(); position = 0
+    with source.open('rb') as src, partial.open('xb') as dst:
+        while raw := src.read(8 * 1024 * 1024):
+            new = b.apply_disc_changes(raw, position, changes); dst.write(new); out_hash.update(new); position += len(raw)
+    assert position == size
+    print('ISO written to exclusive partial; rereading every byte...', flush=True)
+    reread = hashlib.sha256()
+    with partial.open('rb') as dst:
+        while raw := dst.read(8 * 1024 * 1024): reread.update(raw)
+        assert reread.hexdigest() == out_hash.hexdigest()
+        dst.seek(0x420); doff, foff, fsize = struct.unpack('>3I', dst.read(12))
+        assert (doff, foff, fsize) == (dol_offset, fst_offset, inv['fst_size'])
+        assert doff + len(dol) <= foff   # DOL before FST, as on the original disc
+        dst.seek(doff); assert dst.read(len(dol)) == dol
+        dst.seek(foff); t = model_table(dst.read(fsize))
+        for f in inv['files']:
+            n = t['entries'][f['index']]; dst.seek(n['a']); raw = dst.read(n['b'])
+            if f['path'] == 'qp.bin': assert raw == qp and len(parse(raw)) == 1155
+            elif f['path'] == 'opening.bnr': assert raw == banner
+            else: assert (n['a'], n['b'], p.sha(raw)) == (f['offset'], f['size'], f['sha256'])
+    partial.rename(OUTPUT)
+    return {'path': OUTPUT.relative_to(ROOT).as_posix(), 'sha256': out_hash.hexdigest(), 'bytes': position,
+            'changes': manifest, 'all_bytes_reread': True, 'fst_files_reread': len(inv['files']),
+            'boot_order': 'header, apploader, DOL, FST (original order)',
+            'placement': {'dol_offset': dol_offset, 'fst_offset': fst_offset, 'qp_offset': qp_offset}}
+
+
 def main():
     assert not OUTPUT.exists() and not OUTPUT.with_suffix('.iso.partial').exists()
     project = read('project.json'); add = read('translation/text_additions_v06.json')
@@ -368,7 +433,7 @@ def main():
     verify(v05qp, files, replacements, qp, layout)
     inv = read('metadata/disc_inventory_jp.json')
     b.OUTPUT = OUTPUT
-    iso = b.write_iso(inv, dol, bytes(qp), banner)
+    iso = write_iso_boot_order(inv, dol, bytes(qp), banner) if VERSION >= 28 else b.write_iso(inv, dol, bytes(qp), banner)
     print('PASS: ISO', iso['sha256'], flush=True)
 
     desk = copy_verified(OUTPUT, DESKTOP, iso['sha256'])

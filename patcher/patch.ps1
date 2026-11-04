@@ -1,6 +1,6 @@
 # 치비로보! 한글 패처 (게임큐브용 파일 단위 패처, 게임 정보는 data/config.txt)
-# 한글판은 원본 이미지에서 다섯 곳만 바뀐다: 실행 파일(DOL)과 qp.bin 을 디스크 앞쪽 빈 영역으로 옮기고,
-# 디스크 배너(opening.bnr)는 제자리에서 바꾸며, 헤더의 DOL 위치와 파일 목록(FST)의 qp.bin 항목을 고친다.
+# 한글판은 원본 이미지에서 다섯 곳만 바뀐다: 커진 실행 파일(DOL)은 원래 자리에 두고 파일 목록(FST)을 그 바로 뒤로,
+# qp.bin 은 디스크 앞쪽 빈 영역으로 옮기며, 디스크 배너(opening.bnr)는 제자리에서 바꾸고, 헤더의 FST 위치를 고친다.
 # 그래서 원본 이미지를 통째로 복사한 뒤 바뀐 파일만 차분으로 만들어 manifest 6번째 칸 위치에 쓴다.
 # 덤프마다 빈 영역(정크 데이터)이 달라 ISO 전체 MD5가 달라도, 게임 파일만 같으면 적용된다.
 # CISO·WIA·WDF·GCZ 는 동봉한 wit 으로 ISO로 바꾼 뒤 적용한다. RVZ·NKit 는 지원하지 않는다.
@@ -155,7 +155,7 @@ foreach ($line in $lines) {
     $b = Xdelta $orig $patch
     if ($null -eq $b) { Fail "차분 적용 실패(xdelta3 코드 $LASTEXITCODE): $rel" }
     if ((Md5Bytes $b) -ne $dstMd5) { Fail "패치 결과가 다릅니다: $rel" }
-    if ($mode -eq 'fst') { $newFst = $b; continue }
+    if ($mode -eq 'fst') { $newFst = $b; $newFo = [long]$pos; continue }
     $p0 = [long]$pos
     if ($p0 + $b.Length -gt $DISC_SIZE) { Fail "디스크 용량을 넘습니다: $rel" }
     $outFs.Position = $p0; $outFs.Write($b, 0, $b.Length)
@@ -163,7 +163,7 @@ foreach ($line in $lines) {
 }
 Write-Progress -Activity '한글 패치 적용' -Completed
 Write-Host "  바뀐 파일 $($nf)개"
-$outFs.Position = $fo; $outFs.Write($newFst, 0, $newFst.Length)           # 새 파일 목록(FST)은 원래 자리에
+$outFs.Position = $newFo; $outFs.Write($newFst, 0, $newFst.Length)        # 새 파일 목록(FST)은 커진 DOL 바로 뒤에
 $h420 = [byte[]]($cfg.hdr420 -split '(..)' | Where-Object { $_ } | ForEach-Object { [Convert]::ToByte($_, 16) })
 $outFs.Position = 0x420; $outFs.Write($h420, 0, 16)                       # 실행 파일 위치·FST 위치·크기
 $inFs.Close(); $script:inFs = $null
