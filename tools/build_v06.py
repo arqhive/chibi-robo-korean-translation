@@ -39,6 +39,7 @@ V05 = read('metadata/integrated_test_build_v05.json')
 STR_ALIGN = 0x20
 DESKTOP = Path.home() / 'Desktop' / NAME
 SD = Path('D:/games/Chibi-Robo [GGTJ01]/game.iso')
+MOVIE = 'qp/movie/karaoke_teriyaki.thp'   # v30+: Korean karaoke lyrics (tools/karaoke_render.py, karaoke_thp.py)
 
 
 def messages(rows, selected, mapping):
@@ -302,10 +303,11 @@ def copy_verified(src, dst, expected):
     tmp.rename(dst); return {'path': str(dst), 'sha256': expected}
 
 
-def write_iso_boot_order(inv, dol, qp, banner):
+def write_iso_boot_order(inv, dol, qp, banner, movie=None):
     """v28+: keep the original boot order header -> apploader -> DOL -> FST (UWUVCI showed a black
     screen when the DOL sat after the FST). The grown DOL starts at the original DOL offset, the
-    FST follows it, qp.bin moves into the gap before the first file and opening.bnr stays in place."""
+    FST follows it, qp.bin moves into the gap before the first file and opening.bnr stays in place.
+    v30+: movie = Korean karaoke THP, written over the original one (it is smaller; only its FST size changes)."""
     import hashlib
     from verify_integrated_layout import validate_ranges
     from verify_roundtrip import encode_table
@@ -325,11 +327,16 @@ def write_iso_boot_order(inv, dol, qp, banner):
     table = model_table(old_fst); node = table['entries'][qentry['index']]
     assert (node['a'], node['b']) == (qentry['offset'], qentry['size'])
     node['a'], node['b'] = qp_offset, len(qp)
+    mentry = next(x for x in inv['files'] if x['path'] == MOVIE) if movie else None
+    if movie:
+        assert len(movie) <= mentry['size']; table['entries'][mentry['index']]['b'] = len(movie)
     fst = encode_table(table); assert len(fst) == len(old_fst)
     at = qentry['index'] * 12 + 4; restored = bytearray(fst); restored[at:at + 8] = old_fst[at:at + 8]
+    if movie: mt = mentry['index'] * 12 + 8; restored[mt:mt + 4] = old_fst[mt:mt + 4]
     assert restored == old_fst
     struct.pack_into('>2I', header, 0, dol_offset, fst_offset)
     changes = [(0x420, bytes(header)), (dol_offset, dol), (fst_offset, fst), (qp_offset, qp), (bentry['offset'], banner)]
+    if movie: changes.append((mentry['offset'], movie))
     validate_ranges(changes, size)
     for offset, raw in changes[1:4]:   # only boot data and the free gap before the first file
         assert offset + len(raw) <= first_file
@@ -359,6 +366,7 @@ def write_iso_boot_order(inv, dol, qp, banner):
             n = t['entries'][f['index']]; dst.seek(n['a']); raw = dst.read(n['b'])
             if f['path'] == 'qp.bin': assert raw == qp and len(parse(raw)) == 1155
             elif f['path'] == 'opening.bnr': assert raw == banner
+            elif movie and f['path'] == MOVIE: assert n['a'] == f['offset'] and raw == movie
             else: assert (n['a'], n['b'], p.sha(raw)) == (f['offset'], f['size'], f['sha256'])
     partial.rename(OUTPUT)
     return {'path': OUTPUT.relative_to(ROOT).as_posix(), 'sha256': out_hash.hexdigest(), 'bytes': position,
@@ -433,7 +441,8 @@ def main():
     verify(v05qp, files, replacements, qp, layout)
     inv = read('metadata/disc_inventory_jp.json')
     b.OUTPUT = OUTPUT
-    iso = write_iso_boot_order(inv, dol, bytes(qp), banner) if VERSION >= 28 else b.write_iso(inv, dol, bytes(qp), banner)
+    movie = (ROOT / 'work/karaoke/karaoke_teriyaki_ko.thp').read_bytes() if VERSION >= 30 else None
+    iso = write_iso_boot_order(inv, dol, bytes(qp), banner, movie) if VERSION >= 28 else b.write_iso(inv, dol, bytes(qp), banner)
     print('PASS: ISO', iso['sha256'], flush=True)
 
     desk = copy_verified(OUTPUT, DESKTOP, iso['sha256'])

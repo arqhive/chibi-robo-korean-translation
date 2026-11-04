@@ -16,6 +16,7 @@ ORIG = ROOT / 'Chibi-Robo! (Japan) (Rev 1).iso'
 BIN = ROOT / 'tools/bin'
 XDELTA = (BIN / 'xdelta3.exe').resolve()
 CODE, TITLE, RESULT = 'GGTJ', '치비로보!', 'Chibi-Robo (Korean) [GGTJ01]'
+MOVIE = 'qp/movie/karaoke_teriyaki.thp'   # Korean karaoke lyrics, written over the original (smaller)
 
 
 def md5(b): return hashlib.md5(b).hexdigest()
@@ -46,7 +47,7 @@ def image(path):
         head = at(f, 0, 0x440); doff, fo, fsz = struct.unpack_from('>3I', head, 0x420)
         fst = at(f, fo, fsz); files = fst_files(fst)
         dol = at(f, doff, 0x100); dol = at(f, doff, dol_size(dol))
-        blobs = {name: at(f, *files[name]) for name in ('qp.bin', 'opening.bnr')}
+        blobs = {name: at(f, *files[name]) for name in ('qp.bin', 'opening.bnr', MOVIE)}
     return head, fo, fst, files, doff, dol, blobs
 
 
@@ -58,13 +59,15 @@ def main():
     assert ndoff + len(ndol) <= nfo, 'DOL must stay before the FST (UWUVCI black screen otherwise)'
     assert set(ofiles) == set(nfiles)
     # only qp.bin moved; every other file keeps its place
-    assert all(ofiles[k] == nfiles[k] for k in ofiles if k != 'qp.bin')
+    assert all(ofiles[k] == nfiles[k] for k in ofiles if k not in ('qp.bin', MOVIE))
+    assert nfiles[MOVIE][0] == ofiles[MOVIE][0] and nfiles[MOVIE][1] <= ofiles[MOVIE][1]
     name = f'{CODE}_KPatch_v{version}'
     out = ROOT / 'release' / name
     if out.exists(): shutil.rmtree(out)
     (out / 'data').mkdir(parents=True); (out / 'bin').mkdir()
     rows = [('dol', 'main.dol', odol, ndol, ndoff), ('raw', 'qp.bin', oblobs['qp.bin'], nblobs['qp.bin'], nfiles['qp.bin'][0]),
             ('raw', 'opening.bnr', oblobs['opening.bnr'], nblobs['opening.bnr'], nfiles['opening.bnr'][0]),
+            ('raw', MOVIE, oblobs[MOVIE], nblobs[MOVIE], nfiles[MOVIE][0]),
             ('fst', 'fst.bin', ofst, nfst, nfo)]
     manifest = []
     with tempfile.TemporaryDirectory() as tmp:
