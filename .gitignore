@@ -1,0 +1,5 @@
+release/
+*.iso
+*.zip
+__pycache__/
+tools/bin/
