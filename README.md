@@ -5,6 +5,8 @@
 
 **제작: arqhive** · **최신 버전: [v1.0f](../../releases/tag/v1.0f)**
 
+**소개 페이지: [arqhive 한글 패치 아카이브](https://arqhive.vercel.app/korean-translation/chibi-robo)**
+
 - 대사, 메뉴, 아이템·레치커즈 설명, 도움말, 세이브 문구, 전광판 문구를 한글화했습니다.
 - 「치비컴」 로고 등 그림 글씨와 디스크 배너를 한글화했습니다.
 - 노래방 영상 「TERIYAKI 블루스」의 가사를 한글로 바꿨습니다(가사 글꼴: 충주김생체).
